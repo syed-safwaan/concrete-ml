@@ -176,7 +176,7 @@ class MNISTQATModel(nn.Module):
             # prune.remove(self.fc4, "weight")
 
             for fc, (i, o) in zip(self.fcs + [self.quant_out], pairwise(self.cfg)):
-                prune.l1_unstructured(
+                prune.remove(
                     fc, "weight"
                 )
 
