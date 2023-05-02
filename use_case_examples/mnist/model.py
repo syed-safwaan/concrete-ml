@@ -126,10 +126,12 @@ class MNISTQATModel(nn.Module):
         # )
 
         for m in self.modules():
+            print(m)
             if isinstance(m, qnn.QuantLinear):
                 torch.nn.init.uniform_(m.weight.data, -1, 1)
 
     def forward(self, x):
+        x = x.to("cuda")
         x = self.quant_inp(x)
         # x = self.q1(self.bn1(self.fc1(x)))
         # x = self.q2(self.bn2(self.fc2(x)))
