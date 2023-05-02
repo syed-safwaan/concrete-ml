@@ -126,8 +126,8 @@ class MNISTQATModel(nn.Module):
         # )
 
         for m in self.modules():
-            print(m)
             if isinstance(m, qnn.QuantLinear):
+                print(m)
                 torch.nn.init.uniform_(m.weight.data, -1, 1)
 
     def forward(self, x):
