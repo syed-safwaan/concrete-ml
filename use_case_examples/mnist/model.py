@@ -47,7 +47,7 @@ class MNISTQATModel(nn.Module):
             return_quant_tensor=True,
         )
 
-        self.fcs = [
+        self.fcs = nn.ModuleList([
             qnn.QuantLinear(
                 i, o,
                 False,
@@ -55,17 +55,17 @@ class MNISTQATModel(nn.Module):
                 weight_bit_width=w_bits,
                 bias_quant=None,
             ) for (i, o) in pairwise(self.cfg[:-1])
-        ]
+        ])
 
-        self.bns = [
+        self.bns = nn.ModuleList([
             nn.BatchNorm1d(c, momentum=0.999) for c in self.cfg[1:-1]
-        ]
+        ])
 
-        self.qs = [
+        self.qs = nn.ModuleList([
             QuantIdentity(
                 act_quant=CommonActQuant, bit_width=a_bits, return_quant_tensor=True
             ) for _ in range(len(self.cfg) - 2)
-        ]
+        ])
 
         self.quant_out = qnn.QuantLinear(
             self.cfg[-2],
