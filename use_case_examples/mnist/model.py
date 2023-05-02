@@ -28,15 +28,18 @@ from torch.nn import init
 # Concrete-Python
 from concrete import fhe
 
+from itertools import pairwise
+
 
 class MNISTQATModel(nn.Module):
-    def __init__(self, a_bits, w_bits):
+    def __init__(self, a_bits, w_bits, cfg):
         super(MNISTQATModel, self).__init__()
 
         self.a_bits = a_bits
         self.w_bits = w_bits
 
         self.cfg = [28 * 28, 192, 192, 192, 10]
+        self.cfg = cfg
 
         self.quant_inp = qnn.QuantIdentity(
             act_quant=CommonActQuant if a_bits is not None else None,
@@ -44,55 +47,83 @@ class MNISTQATModel(nn.Module):
             return_quant_tensor=True,
         )
 
-        self.fc1 = qnn.QuantLinear(
-            self.cfg[0],
-            self.cfg[1],
-            False,
-            weight_quant=CommonWeightQuant if w_bits is not None else None,
-            weight_bit_width=w_bits,
-            bias_quant=None,
-        )
+        self.fcs = [
+            qnn.QuantLinear(
+                i, o,
+                False,
+                weight_quant=CommonWeightQuant if w_bits is not None else None,
+                weight_bit_width=w_bits,
+                bias_quant=None,
+            ) for (i, o) in pairwise(self.cfg[:-1])
+        ]
 
-        self.bn1 = nn.BatchNorm1d(self.cfg[1], momentum=0.999)
-        self.q1 = QuantIdentity(
-            act_quant=CommonActQuant, bit_width=a_bits, return_quant_tensor=True
-        )
+        self.bns = [
+            nn.BatchNorm1d(c, momentum=0.999) for c in self.cfg[1:-1]
+        ]
 
-        self.fc2 = qnn.QuantLinear(
-            self.cfg[1],
-            self.cfg[2],
-            False,
-            weight_quant=CommonWeightQuant if w_bits is not None else None,
-            weight_bit_width=w_bits,
-            bias_quant=None,  # FheBiasQuant if w_bits is not None else None,
-        )
+        self.qs = [
+            QuantIdentity(
+                act_quant=CommonActQuant, bit_width=a_bits, return_quant_tensor=True
+            ) for _ in range(len(self.cfg) - 2)
+        ]
 
-        self.bn2 = nn.BatchNorm1d(self.cfg[1], momentum=0.999)
-        self.q2 = QuantIdentity(
-            act_quant=CommonActQuant, bit_width=a_bits, return_quant_tensor=True
-        )
-
-        self.fc3 = qnn.QuantLinear(
-            self.cfg[2],
-            self.cfg[3],
-            False,
-            weight_quant=CommonWeightQuant if w_bits is not None else None,
-            weight_bit_width=w_bits,
-            bias_quant=None,
-        )
-
-        self.bn3 = nn.BatchNorm1d(self.cfg[1], momentum=0.999)
-        self.q3 = QuantIdentity(
-            act_quant=CommonActQuant, bit_width=a_bits, return_quant_tensor=True
-        )
-
-        self.fc4 = qnn.QuantLinear(
-            self.cfg[3],
-            self.cfg[4],
+        self.quant_out = qnn.QuantLinear(
+            self.cfg[-2],
+            self.cfg[-1],
             False,
             weight_quant=CommonWeightQuant if w_bits is not None else None,
             weight_bit_width=w_bits,
         )
+
+        # self.fc1 = qnn.QuantLinear(
+        #     self.cfg[0],
+        #     self.cfg[1],
+        #     False,
+        #     weight_quant=CommonWeightQuant if w_bits is not None else None,
+        #     weight_bit_width=w_bits,
+        #     bias_quant=None,
+        # )
+
+        # self.bn1 = nn.BatchNorm1d(self.cfg[1], momentum=0.999)
+        # self.q1 = QuantIdentity(
+        #     act_quant=CommonActQuant, bit_width=a_bits, return_quant_tensor=True
+        # )
+
+        # self.fc2 = qnn.QuantLinear(
+        #     self.cfg[1],
+        #     self.cfg[2],
+        #     False,
+        #     weight_quant=CommonWeightQuant if w_bits is not None else None,
+        #     weight_bit_width=w_bits,
+        #     bias_quant=None,  # FheBiasQuant if w_bits is not None else None,
+        # )
+
+        # self.bn2 = nn.BatchNorm1d(self.cfg[1], momentum=0.999)
+        # self.q2 = QuantIdentity(
+        #     act_quant=CommonActQuant, bit_width=a_bits, return_quant_tensor=True
+        # )
+
+        # self.fc3 = qnn.QuantLinear(
+        #     self.cfg[2],
+        #     self.cfg[3],
+        #     False,
+        #     weight_quant=CommonWeightQuant if w_bits is not None else None,
+        #     weight_bit_width=w_bits,
+        #     bias_quant=None,
+        # )
+
+        # self.bn3 = nn.BatchNorm1d(self.cfg[1], momentum=0.999)
+        # self.q3 = QuantIdentity(
+        #     act_quant=CommonActQuant, bit_width=a_bits, return_quant_tensor=True
+        # )
+
+        # self.fc4 = qnn.QuantLinear(
+        #     self.cfg[3],
+        #     self.cfg[4],
+        #     False,
+        #     weight_quant=CommonWeightQuant if w_bits is not None else None,
+        #     weight_bit_width=w_bits,
+        # )
 
         for m in self.modules():
             if isinstance(m, qnn.QuantLinear):
@@ -100,39 +131,52 @@ class MNISTQATModel(nn.Module):
 
     def forward(self, x):
         x = self.quant_inp(x)
-        x = self.q1(self.bn1(self.fc1(x)))
-        x = self.q2(self.bn2(self.fc2(x)))
-        x = self.q3(self.bn3(self.fc3(x)))
-        x = self.fc4(x)
+        # x = self.q1(self.bn1(self.fc1(x)))
+        # x = self.q2(self.bn2(self.fc2(x)))
+        # x = self.q3(self.bn3(self.fc3(x)))
+        for fc, bn, q in zip(self.fcs, self.bns, self.qs):
+            x = q(bn(fc(x)))
+        x = self.quant_out(x)
         return x
 
     def prune(self, sparsity, enable):
         if not self.a_bits or not self.w_bits:
             return
 
-        n_max_mac = 14  # int(np.floor((2**7 - 1) / (2**self.w_bits - 1) / (2**self.a_bits - 1)))
+        # int(np.floor((2**7 - 1) / (2**self.w_bits - 1) / (2**self.a_bits - 1)))
+        n_max_mac = 14
         assert n_max_mac > 0
 
         n_max_mac = int(n_max_mac * sparsity)
 
         if enable:
-            prune.l1_unstructured(
-                self.fc1, "weight", amount=(self.cfg[0] - n_max_mac) * self.cfg[1]
-            )
-            prune.l1_unstructured(
-                self.fc2, "weight", amount=(self.cfg[1] - n_max_mac) * self.cfg[2]
-            )
-            prune.l1_unstructured(
-                self.fc3, "weight", amount=(self.cfg[2] - n_max_mac) * self.cfg[3]
-            )
-            prune.l1_unstructured(
-                self.fc4, "weight", amount=(self.cfg[3] - n_max_mac) * self.cfg[4]
-            )
+            # prune.l1_unstructured(
+            #     self.fc1, "weight", amount=(self.cfg[0] - n_max_mac) * self.cfg[1]
+            # )
+            # prune.l1_unstructured(
+            #     self.fc2, "weight", amount=(self.cfg[1] - n_max_mac) * self.cfg[2]
+            # )
+            # prune.l1_unstructured(
+            #     self.fc3, "weight", amount=(self.cfg[2] - n_max_mac) * self.cfg[3]
+            # )
+            # prune.l1_unstructured(
+            #     self.fc4, "weight", amount=(self.cfg[3] - n_max_mac) * self.cfg[4]
+            # )
+
+            for fc, (i, o) in zip(self.fcs + [self.quant_out], pairwise(self.cfg)):
+                prune.l1_unstructured(
+                    fc, "weight", amount=(i - n_max_mac) * o
+                )
         else:
-            prune.remove(self.fc1, "weight")
-            prune.remove(self.fc2, "weight")
-            prune.remove(self.fc3, "weight")
-            prune.remove(self.fc4, "weight")
+            # prune.remove(self.fc1, "weight")
+            # prune.remove(self.fc2, "weight")
+            # prune.remove(self.fc3, "weight")
+            # prune.remove(self.fc4, "weight")
+
+            for fc, (i, o) in zip(self.fcs + [self.quant_out], pairwise(self.cfg)):
+                prune.l1_unstructured(
+                    fc, "weight"
+                )
 
 
 class CommonQuant(ExtendedInjector):
